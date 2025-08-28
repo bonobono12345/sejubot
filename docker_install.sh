@@ -144,20 +144,25 @@ else
   echo "✅ Docker is already installed."
 fi
 
-### === Install Paxi ===
 if [ ! -d "paxi" ]; then
   git clone $PAXI_REPO
   cd paxi
   git checkout $PAXI_TAG
-  make docker
 else
   cd paxi
   git checkout $PAXI_TAG
-  make docker
 fi
 
-if [ ! -d "$HOME/paxid" ]; then
-  mkdir "$HOME/paxid" 
+# --- Docker build compatibility fix ---
+DOCKER_VERSION=$(docker version --format '{{.Server.Version}}' | cut -d'.' -f1,2)
+echo "🐳 Detected Docker version: $DOCKER_VERSION"
+
+if dpkg --compare-versions "$DOCKER_VERSION" ge "20.10"; then
+  echo "✅ Using modern build with --progress=plain"
+  docker build -t paxi-node:latest . --progress=plain
+else
+  echo "⚠️ Old Docker detected, building without --progress flag"
+  docker build -t paxi-node:latest .
 fi
 cd $HOME/paxid 
 
