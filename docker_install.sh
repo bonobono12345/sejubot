@@ -1,44 +1,96 @@
 #!/bin/bash
-echo "❌ Installation cancelled. Please review the instructions and run this script again."
-exit 1
+set -e
+
+### === Required parameters ===
+REQUIRED_CPU=4
+REQUIRED_RAM_GB=8
+REQUIRED_DISK_GB=100
+
+### === Get CPU cores ===
+CPU_CORES=$(nproc)
+
+### === Get total memory (in GB) ===
+TOTAL_MEM=$(free -g | awk '/^Mem:/{print $2}')
+
+### === Get available disk space (in GB), using root directory / ===
+DISK_SPACE=$(df -BG / | awk 'NR==2 {gsub("G","",$4); print $4}')
+
+### === Check CPU ===
+if [ "$CPU_CORES" -lt "$REQUIRED_CPU" ]; then
+  echo "❌ Insufficient CPU cores: Required at least ${REQUIRED_CPU} cores, but found ${CPU_CORES} cores"
+  exit 1
 fi
 
+### === Check RAM ===
+if [ "$TOTAL_MEM" -lt "$REQUIRED_RAM_GB" ]; then
+  echo "❌ Insufficient memory: Required at least ${REQUIRED_RAM_GB} GB, but found ${TOTAL_MEM} GB"
+  exit 1
+fi
+
+### === Check disk space ===
+if [ "$DISK_SPACE" -lt "$REQUIRED_DISK_GB" ]; then
+  echo "❌ Insufficient disk space: Required at least ${REQUIRED_DISK_GB} GB, but found ${DISK_SPACE} GB"
+  exit 1
+fi
+
+echo "============================================================"
+echo "🚨  PAXI Validator Node Installation Warning"
+echo "============================================================"
+echo ""
+echo "🛑 CRITICAL WARNING:"
+echo "❗ If more than 1/3 of validator nodes go offline, the entire blockchain will halt."
+echo "❗ You must back up the entire paxi folder, especially your node's private keys (node_key.json, priv_validator_key.json, mnemonic phrase)."
+echo "   If your machine fails, this is the only way to restore your validator and reclaim your staking rewards."
+echo ""
+echo "⚠️ Please note:"
+echo "   Once you stake and become a validator, the system will"
+echo "   automatically monitor your online status."
+echo ""
+echo "❗ If you go offline without undelegating (e.g. shutdown or disconnect),"
+echo "   the system will treat it as a slashing offense and"
+echo "   automatically deduct a portion of your staked tokens."
+echo ""
+echo "✅ Correct way to go offline:"
+echo "   Use the Undelegate command to leave the validator role"
+echo "   before stopping or shutting down your node."
+echo ""
+echo "🚫 Shutting down your node directly may result in slashing penalties."
+echo "   Please make sure you understand!"
+echo ""
+echo "============================================================"
+read -p "Do you understand the above risks and wish to continue? (y/N): " confirm
+
+if [[ "$confirm" != "y" && "$confirm" != "Y" ]]; then
+  echo "❌ Installation cancelled. Please review the instructions and run this script again."
+  exit 1
+fi
 
 echo "📝 Please enter your node moniker (name):"
 read -p "Node name: " NODE_MONIKER
 
-
 if [[ -z "$NODE_MONIKER" ]]; then
-echo "❌ Node name cannot be empty. Please rerun the script."
-exit 1
+  echo "❌ Node name cannot be empty. Please rerun the script."
+  exit 1
 fi
 
-
 echo "✅ Node name set to: $NODE_MONIKER"
-
 
 echo "📝 Please enter a name for your wallet (key name):"
 read -p "Wallet name (key name): " KEY_NAME
 if [[ -z "$KEY_NAME" ]]; then
-echo "❌ Wallet name cannot be empty. Please rerun the script."
-exit 1
+  echo "❌ Wallet name cannot be empty. Please rerun the script."
+  exit 1
 fi
-
-
 echo "✅ Wallet name set to: $KEY_NAME"
-
 
 read -p "Enter your emergency contact email: " SECURITY_CONTACT
 if [[ -z "$SECURITY_CONTACT" ]]; then
-echo "❌ Emergency contact cannot be empty. Please rerun the script."
-exit 1
+  echo "❌ Emergency contact cannot be empty. Please rerun the script."
+  exit 1
 fi
 read -p "Enter your website or contact page (can be X, Facebook, Telegram, WhatsApp, Discord, Github, etc.): " WEBSITE
 
 
-# ========================
-# PAXI Variables
-# ========================
 PAXI_REPO="https://github.com/paxi-web3/paxi"
 PAXI_TAG="latest-main"
 CHAIN_ID="paxi-mainnet"
@@ -56,65 +108,56 @@ DENOM="upaxi"
 DOCKER_IMAGE="paxi-node"
 DOCKER_PAXI_DATA_PATH="/root/paxi"
 
-
-# ========================
-# Install dependencies
-# ========================
+### === Install dependencies ===
 echo ""
 sudo apt-get update
 sudo apt-get install -y \
-ca-certificates curl gnupg lsb-release git make unzip jq
+    ca-certificates curl gnupg lsb-release git make unzip jq
 
-
-# ========================
-# Install Docker
-# ========================
+### === Install Docker ===
 if ! command -v docker &> /dev/null; then
-echo "Installing Docker..."
-sudo mkdir -p /etc/apt/keyrings
-curl -fsSL https://download.docker.com/linux/ubuntu/gpg | \
-sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+  echo "Installing Docker..."
+  sudo mkdir -p /etc/apt/keyrings
+  curl -fsSL https://download.docker.com/linux/ubuntu/gpg | \
+    sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
 
+  echo \
+    "deb [arch=$(dpkg --print-architecture) \
+    signed-by=/etc/apt/keyrings/docker.gpg] \
+    https://download.docker.com/linux/ubuntu \
+    $(lsb_release -cs) stable" | \
+    sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
 
-echo \
-"deb [arch=$(dpkg --print-architecture) \
-signed-by=/etc/apt/keyrings/docker.gpg] \
-https://download.docker.com/linux/ubuntu \
-$(lsb_release -cs) stable" | \
-sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+  sudo apt-get update
+  sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
 
+  # Enable Docker for non-root users
+  sudo systemctl enable docker
+  sudo systemctl start docker
+  sudo usermod -aG docker $USER
 
-sudo apt-get update
-sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
-
-
-# Enable Docker for non-root users
-sudo systemctl enable docker
-sudo systemctl start docker
-sudo usermod -aG docker $USER
-
-
-if [ "$EUID" -ne 0 ]; then
-echo "⚠️ You may need to log out and back in (or run 'newgrp docker') to apply Docker permissions, then run this script again."
-exit 1
-fi
+  if [ "$EUID" -ne 0 ]; then
+    echo "⚠️ You may need to log out and back in (or run 'newgrp docker') to apply Docker permissions, then run this script again."
+    exit 1
+  fi
 else
-echo "✅ Docker is already installed."
+  echo "✅ Docker is already installed."
 fi
 
-
-# ========================
-# Install Paxi
-# ========================
+### === Install Paxi ===
 if [ ! -d "paxi" ]; then
-git clone $PAXI_REPO
-cd paxi
-git checkout $PAXI_TAG
-make docker
+  git clone $PAXI_REPO
+  cd paxi
+  git checkout $PAXI_TAG
+  make docker
 else
-cd paxi
-git checkout $PAXI_TAG
-make docker
+  cd paxi
+  git checkout $PAXI_TAG
+  make docker
+fi
+
+if [ ! -d "$HOME/paxid" ]; then
+  mkdir "$HOME/paxid" 
 fi
 cd $HOME/paxid 
 
